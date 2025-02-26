@@ -10,7 +10,10 @@ venvDir=.venv
 export UV_PYTHON_PREFERENCE=only-system
 
 uvVenvShellHook() {
-    uv sync --frozen
+    local uvExtraArgsArray=()
+    concatTo uvExtraArgsArray uvExtraArgs
+
+    NIX_ENFORCE_PURITY=0 uv sync --frozen "${uvExtraArgsArray[@]}"
 
     # shellcheck disable=SC1091
     source "$venvDir/bin/activate"
