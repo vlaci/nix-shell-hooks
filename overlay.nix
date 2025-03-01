@@ -11,11 +11,18 @@ final: prev: {
       in
       {
         uvVenvShellHook = callPackage (
-          { makePythonHook, uv }:
+          {
+            makePythonHook,
+            nix,
+            uv,
+          }:
 
           makePythonHook {
             name = "uv-venv-hook";
             propagatedBuildInputs = [ uv ];
+            substitutions = {
+              inherit nix;
+            };
           } ./uv-venv-shell-hook.sh
         ) { };
 
