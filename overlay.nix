@@ -79,14 +79,43 @@ final: prev: {
             bintools,
             nix,
             python,
+            writeShellScriptBin,
+            runCommand,
+            makeBinaryWrapper,
+            patchelf,
           }:
 
           makePythonHook {
             name = "auto-patchelf-venv-hook";
-            propagatedBuildInputs = [
-              auto-patchelf
-              bintools
-            ];
+            propagatedBuildInputs =
+              let
+                patchelf' = writeShellScriptBin "patchelf" ''
+                  output=$(${patchelf}/bin/patchelf "$@" 2>&1 >/dev/null)
+                  exit_code=$?
+
+                  if [[ $exit_code -eq 1 && "$output" == "patchelf: open: "* ]]; then
+                      echo "$output" >&2
+                      exit 0
+                  elif [[ -n "$output" ]]; then
+                      echo "$output" >&2
+                      exit $exit_code
+                  fi
+                '';
+                auto-patchelf' =
+                  runCommand "auto-patchelf-wrapped"
+                    {
+                      nativeBuildInputs = [ makeBinaryWrapper ];
+                    }
+                    ''
+                      mkdir -p $out/bin
+                      makeWrapper ${auto-patchelf}/bin/auto-patchelf $out/bin/auto-patchelf \
+                        --prefix PATH : ${patchelf'}/bin
+                    '';
+              in
+              [
+                auto-patchelf'
+                bintools
+              ];
             substitutions = {
               inherit nix;
               pythonSitePackages = python.sitePackages;
