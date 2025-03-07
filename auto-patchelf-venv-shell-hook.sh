@@ -37,7 +37,6 @@ autoPatchelfVenvShellHook() {
         local rc="${PIPESTATUS[0]}"
         [[ "$rc" -ne 0 ]] && {
             echo "Add missing dependencies to \`libraries\`"
-            exit "$rc"
         }
 
         # patchelf may change the checksum
