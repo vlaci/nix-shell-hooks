@@ -3,6 +3,24 @@
 # SPDX-License-Identifier: EUPL-1.2
 
 final: prev: {
+  auto-patchelf-rs = final.callPackage (
+    { rustPlatform }:
+
+    rustPlatform.buildRustPackage {
+      name = "auto-patchelf";
+      src = ./.;
+      cargoLock = {
+        lockFile = ./Cargo.lock;
+      };
+      cargoFlags = [
+        "--package"
+        "auto-patchelf"
+      ];
+      postPatch = ''
+        substituteInPlace auto-patchelf/src/main.rs --replace-fail "@defaultBintools@" "$NIX_BINTOOLS"
+      '';
+    }
+  ) { };
   pythonPackagesExtensions = prev.pythonPackagesExtensions ++ [
     (
       python-final: _python-prev:
@@ -75,47 +93,18 @@ final: prev: {
         autoPatchelfVenvShellHook = callPackage (
           {
             makePythonHook,
-            auto-patchelf,
+            auto-patchelf-rs,
             bintools,
             nix,
             python,
-            writeShellScriptBin,
-            runCommand,
-            makeBinaryWrapper,
-            patchelf,
           }:
 
           makePythonHook {
             name = "auto-patchelf-venv-hook";
-            propagatedBuildInputs =
-              let
-                patchelf' = writeShellScriptBin "patchelf" ''
-                  output=$(${patchelf}/bin/patchelf "$@" 2>&1 >/dev/null)
-                  exit_code=$?
-
-                  if [[ $exit_code -eq 1 && "$output" == "patchelf: open: "* ]]; then
-                      echo "$output" >&2
-                      exit 0
-                  elif [[ -n "$output" ]]; then
-                      echo "$output" >&2
-                      exit $exit_code
-                  fi
-                '';
-                auto-patchelf' =
-                  runCommand "auto-patchelf-wrapped"
-                    {
-                      nativeBuildInputs = [ makeBinaryWrapper ];
-                    }
-                    ''
-                      mkdir -p $out/bin
-                      makeWrapper ${auto-patchelf}/bin/auto-patchelf $out/bin/auto-patchelf \
-                        --prefix PATH : ${patchelf'}/bin
-                    '';
-              in
-              [
-                auto-patchelf'
-                bintools
-              ];
+            propagatedBuildInputs = [
+              auto-patchelf-rs
+              bintools
+            ];
             substitutions = {
               inherit nix;
               pythonSitePackages = python.sitePackages;

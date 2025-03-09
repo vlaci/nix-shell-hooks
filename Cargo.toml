@@ -1,0 +1,17 @@
+# SPDX-FileCopyrightText: 2025 László Vaskó <vlaci@fastmail.com>
+#
+# SPDX-License-Identifier: EUPL-1.2
+
+[workspace]
+members = ["auto-patchelf"]
+resolver = "2"
+
+[workspace.package]
+authors = ["László Vaskó <vlaci@fastmail.com>"]
+edition = "2021"
+license = "MIT"
+rust-version = "1.82.0"
+version = "0.0.0"
+
+[profile.release]
+debug = true

@@ -67,11 +67,25 @@
         };
       });
 
-      devShells = forAllSystems (system: {
-        default = nixpkgs.legacyPackages.${system}.mkShell {
-          inherit (self.checks.${system}.pre-commit) shellHook;
-          buildInputs = self.checks.${system}.pre-commit.enabledPackages;
-        };
-      });
+      devShells = forAllSystems (
+        system: with nixpkgs.legacyPackages.${system}; {
+          default = mkShell {
+            inherit (self.checks.${system}.pre-commit) shellHook;
+            buildInputs = self.checks.${system}.pre-commit.enabledPackages ++ [
+              cargo
+              cargo-flamegraph
+              cargo-features-manager
+              gdb
+              hotspot
+              linuxPackages.perf
+              samply
+              rustc
+              rust-analyzer
+              rustfmt
+              clippy
+            ];
+          };
+        }
+      );
     };
 }
