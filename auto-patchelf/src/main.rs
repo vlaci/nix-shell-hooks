@@ -15,7 +15,7 @@ use std::{
     collections::HashMap,
     env,
     fs::{self, File},
-    io::Read,
+    io::{Read, Seek},
     os::unix::fs::MetadataExt,
     path::{Path, PathBuf},
     process::Command,
@@ -26,8 +26,8 @@ use crate::{
     cache::LibraryCache,
     cli::{Cli, PatchConfig},
     concurrency::SharedHandle,
-    elf::{machine_to_str, osabi_are_compatible, osabi_to_string, ElfFile},
-    misc::{glob, read_file},
+    elf::{e_machine_to_str, e_osabi_to_str, osabi_are_compatible, ElfFile},
+    misc::glob,
     state::DirState,
 };
 
@@ -41,18 +41,19 @@ struct Dependency {
 }
 
 /// Patches a single ELF file
-fn auto_patchelf_file(
+fn auto_patchelf_file<S: Read + Seek>(
     args: &PatchConfig,
     path: &Path,
     library_computation: &SharedHandle<LibraryCache>,
     interpreter_path: &Path,
-    interpreter: &ElfFile,
+    interpreter: &ElfFile<S>,
     libc_lib: &Path,
 ) -> Result<Vec<Dependency>> {
     let mut dependencies = Vec::new();
 
-    let content = read_file(path).unwrap();
-    let elf_file: ElfFile = match ElfFile::new(&content) {
+    let f = File::open(path)?;
+
+    let mut elf_file = match ElfFile::new(f) {
         Ok(elf) => elf,
         Err(_) => return Ok(dependencies),
     };
@@ -75,8 +76,8 @@ fn auto_patchelf_file(
         println!(
             "skipping {} because its architecture ({}) differs from target ({})",
             path.display(),
-            machine_to_str(elf_file.get_arch()),
-            machine_to_str(interpreter.get_arch())
+            e_machine_to_str(elf_file.get_arch()).unwrap_or("unknown"),
+            e_machine_to_str(interpreter.get_arch()).unwrap_or("unknown"),
         );
         return Ok(dependencies);
     }
@@ -85,14 +86,17 @@ fn auto_patchelf_file(
         println!(
             "skipping {} because its OS ABI ({}) is not compatible with target ({})",
             path.display(),
-            osabi_to_string(elf_file.get_osabi()),
-            osabi_to_string(interpreter.get_osabi())
+            e_osabi_to_str(elf_file.get_osabi()).unwrap_or("unknown"),
+            e_osabi_to_str(interpreter.get_osabi()).unwrap_or("unknown")
         );
         return Ok(dependencies);
     }
 
     let file_is_dynamic_executable = elf_file.is_dynamic_executable();
-    let file_dependencies = elf_file.get_dependencies();
+    let file_dependencies = elf_file
+        .parse()?
+        .map(|p| p.dependencies)
+        .unwrap_or_else(Vec::new);
 
     let mut rpath = Vec::new();
 
@@ -233,9 +237,9 @@ fn auto_patchelf_file(
 }
 
 /// Main auto-patchelf function
-fn auto_patchelf(
+fn auto_patchelf<S: Read + Seek>(
     cli: &Cli,
-    interpreter: &ElfFile,
+    interpreter: &ElfFile<S>,
     interpreter_path: &Path,
     libc_lib: &Path,
 ) -> Result<()> {
@@ -372,9 +376,8 @@ fn main() -> Result<()> {
     let libc_lib =
         PathBuf::from(fs::read_to_string(nix_support.join("orig-libc"))?.trim()).join("lib");
 
-    let content = read_file(&interpreter_path)
-        .wrap_err_with(|| format!("Failed to read file {}", interpreter_path.display(),))?;
-    let interpreter = ElfFile::new(&content).wrap_err_with(|| {
+    let f = File::open(&interpreter_path)?;
+    let interpreter = ElfFile::new(f).wrap_err_with(|| {
         format!(
             "Failed to parse dynamic linker properties from {}",
             interpreter_path.display(),

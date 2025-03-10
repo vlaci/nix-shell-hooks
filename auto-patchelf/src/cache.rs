@@ -4,6 +4,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
+    fs::File,
     path::{Path, PathBuf},
 };
 
@@ -11,7 +12,7 @@ use eyre::Result;
 
 use crate::{
     elf::{osabi_are_compatible, Arch, ElfFile, OsAbi},
-    misc::{glob, read_file},
+    misc::glob,
 };
 
 /// Library cache to avoid duplicate scanning
@@ -51,15 +52,21 @@ impl LibraryCache {
                     Ok(p) if p.file_name() == path.file_name() => p,
                     _ => path.clone(),
                 };
-                let content = read_file(&path)?;
-                if let Ok(elf) = ElfFile::new(&content) {
+
+                let f = File::open(&path)?;
+
+                if let Ok(mut elf) = ElfFile::new(f) {
+                    let parsed = elf.parse()?;
                     // Add RPATH directories to search list
-                    let rpath: Vec<PathBuf> = elf
-                        .get_rpath()
-                        .iter()
-                        .filter(|p| !p.is_empty() && !p.contains("$ORIGIN"))
-                        .map(PathBuf::from)
-                        .collect();
+                    let rpath: Vec<PathBuf> = parsed
+                        .map(|p| {
+                            p.rpath
+                                .iter()
+                                .filter(|p| !p.is_empty() && !p.contains("$ORIGIN"))
+                                .map(PathBuf::from)
+                                .collect()
+                        })
+                        .unwrap_or_else(Vec::new);
 
                     lib_dirs.extend(rpath);
 

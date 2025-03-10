@@ -2,104 +2,109 @@
 //
 // SPDX-License-Identifier: EUPL-1.2
 
-use std::path::PathBuf;
+use std::{
+    io::{Read, Seek},
+    path::PathBuf,
+};
 
+use elf::{abi, endian::AnyEndian, note::Note, ElfStream};
 use eyre::Result;
-use goblin::elf::{dynamic, header, program_header, Elf};
 use miniserde::{json, Deserialize};
 
-pub(crate) use goblin::elf::header::machine_to_str;
+pub(crate) use elf::to_str::e_machine_to_str;
+pub(crate) use elf::to_str::e_osabi_to_str;
 
-pub(crate) struct ElfFile<'a> {
-    content: &'a [u8],
-    elf: Elf<'a>,
+pub(crate) struct ElfFile<S: Read + Seek> {
+    elf: ElfStream<AnyEndian, S>,
 }
 
 pub(crate) type Arch = u16;
 pub(crate) type OsAbi = u8;
 
-impl<'a> ElfFile<'a> {
-    pub(crate) fn new(content: &'a Vec<u8>) -> Result<Self> {
-        let elf = Elf::parse(content)?;
-        Ok(Self { content, elf })
+impl<S: Read + Seek> ElfFile<S> {
+    pub(crate) fn new(reader: S) -> Result<Self> {
+        let stream = ElfStream::open_stream(reader)?;
+        Ok(Self { elf: stream })
     }
     pub(crate) fn get_arch(&self) -> Arch {
-        self.elf.header.e_machine
+        self.elf.ehdr.e_machine
     }
 
     pub(crate) fn get_osabi(&self) -> OsAbi {
-        self.elf.header.e_ident[header::EI_OSABI]
+        self.elf.ehdr.osabi
     }
 
     pub(crate) fn has_program_headers(&self) -> bool {
-        !self.elf.program_headers.is_empty()
+        !self.elf.segments().is_empty()
     }
 
     /// Checks if an ELF file is a statically linked executable
     pub(crate) fn is_static_executable(&self) -> bool {
-        self.elf.header.e_type == header::ET_EXEC
+        self.elf.ehdr.e_type == abi::ET_EXEC
             && !self
                 .elf
-                .program_headers
+                .segments()
                 .iter()
-                .any(|ph| ph.p_type == program_header::PT_INTERP)
+                .any(|ph| ph.p_type == abi::PT_INTERP)
     }
 
     /// Checks if an ELF file is a dynamically linked executable
     pub(crate) fn is_dynamic_executable(&self) -> bool {
         self.elf
-            .program_headers
+            .segments()
             .iter()
-            .any(|ph| ph.p_type == program_header::PT_INTERP)
+            .any(|ph| ph.p_type == abi::PT_INTERP)
     }
 
-    /// Gets the RPATH from the dynamic section
-    pub(crate) fn get_rpath(&self) -> Vec<String> {
-        if let Some(dynamics) = &self.elf.dynamic {
-            // First try RUNPATH
-            for dynamic in &dynamics.dyns {
-                if dynamic.d_tag == dynamic::DT_RUNPATH {
-                    if let Some(runpath) = self.elf.dynstrtab.get_at(dynamic.d_val as usize) {
-                        return runpath.split(':').map(String::from).collect();
-                    }
-                }
-            }
+    pub(crate) fn parse(&mut self) -> Result<Option<ParsedElf>> {
+        let dynamics = self.elf.dynamic()?;
 
-            // Fall back to RPATH
-            for dynamic in &dynamics.dyns {
-                if dynamic.d_tag == dynamic::DT_RPATH {
-                    if let Some(rpath) = self.elf.dynstrtab.get_at(dynamic.d_val as usize) {
-                        return rpath.split(':').map(String::from).collect();
-                    }
-                }
+        let Some(dynamics) = dynamics else {
+            return Ok(None);
+        };
+
+        let mut dt_runpath = None;
+        let mut dt_rpath = None;
+        let mut dt_needed = None;
+
+        for d in dynamics.iter() {
+            match d.d_tag {
+                abi::DT_RUNPATH => dt_runpath = Some(d.d_val()),
+                abi::DT_RPATH => dt_rpath = Some(d.d_val()),
+                abi::DT_NEEDED => dt_needed = Some(d.d_val()),
+                _ => (),
             }
         }
 
-        Vec::with_capacity(0)
-    }
+        let (symtab, strings) = self.elf.dynamic_symbol_table()?.unwrap();
 
-    /// Gets the dynamic dependencies of an ELF file
-    pub(crate) fn get_dependencies(&self) -> Vec<Vec<PathBuf>> {
+        // First try RUNPATH
+        let rpath = if let Some(path) = dt_runpath.or(dt_rpath) {
+            strings
+                .get(path as _)
+                .map_or_else(|e| Vec::new(), |p| p.split(':').map(String::from).collect())
+        } else {
+            Vec::new()
+        };
+
         let mut dependencies = Vec::new();
 
-        if let Some(dynamics) = &self.elf.dynamic {
-            for dynamic in &dynamics.dyns {
-                if dynamic.d_tag == dynamic::DT_NEEDED {
-                    if let Some(name) = self.elf.dynstrtab.get_at(dynamic.d_val as usize) {
-                        dependencies.push(vec![PathBuf::from(name)]);
-                    }
-                }
+        if let Some(needed) = dt_needed {
+            if let Ok(name) = strings.get(needed as usize) {
+                dependencies.push(vec![PathBuf::from(name)]);
             }
         }
 
         // Find .note.dlopen section
         // See https://systemd.io/ELF_DLOPEN_METADATA/
-        if let Some(notes) = &self
-            .elf
-            .iter_note_sections(self.content, Some(".note.dlopen"))
-        {
-            for note in &notes.iters {
-                let Ok(text) = String::from_utf8(note.data.into()) else {
+        if let Some(shdr) = self.elf.section_header_by_name(".note.dlopen")? {
+            let shdr = *shdr;
+            let notes = self.elf.section_data_as_notes(&shdr)?;
+            for note in notes {
+                let Note::Unknown(data) = note else {
+                    continue;
+                };
+                let Ok(text) = String::from_utf8(data.desc.into()) else {
                     continue;
                 };
                 let Ok(dlopen) = json::from_str::<DlOpen>(&text) else {
@@ -111,8 +116,16 @@ impl<'a> ElfFile<'a> {
             }
         }
 
-        dependencies
+        Ok(Some(ParsedElf {
+            rpath,
+            dependencies,
+        }))
     }
+}
+
+pub(crate) struct ParsedElf {
+    pub(crate) rpath: Vec<String>,
+    pub(crate) dependencies: Vec<Vec<PathBuf>>,
 }
 
 #[derive(Deserialize)]
@@ -120,27 +133,9 @@ struct DlOpen {
     soname: Vec<String>,
 }
 
-/// Gets OS ABI information from the ELF header
-pub(crate) fn osabi_to_string(abi: OsAbi) -> String {
-    match abi {
-        header::ELFOSABI_SYSV => "ELFOSABI_SYSV".to_string(),
-        header::ELFOSABI_HPUX => "ELFOSABI_HPUX".to_string(),
-        header::ELFOSABI_NETBSD => "ELFOSABI_NETBSD".to_string(),
-        header::ELFOSABI_LINUX => "ELFOSABI_LINUX".to_string(),
-        header::ELFOSABI_SOLARIS => "ELFOSABI_SOLARIS".to_string(),
-        header::ELFOSABI_AIX => "ELFOSABI_AIX".to_string(),
-        header::ELFOSABI_IRIX => "ELFOSABI_IRIX".to_string(),
-        header::ELFOSABI_FREEBSD => "ELFOSABI_FREEBSD".to_string(),
-        header::ELFOSABI_TRU64 => "ELFOSABI_TRU64".to_string(),
-        header::ELFOSABI_MODESTO => "ELFOSABI_MODESTO".to_string(),
-        header::ELFOSABI_OPENBSD => "ELFOSABI_OPENBSD".to_string(),
-        abi => format!("unknown_{abi}"),
-    }
-}
-
 /// Checks if two OS ABIs are compatible
 pub(crate) fn osabi_are_compatible(wanted: OsAbi, got: OsAbi) -> bool {
-    if wanted == header::ELFOSABI_SYSV || got == header::ELFOSABI_SYSV {
+    if wanted == abi::ELFOSABI_SYSV || got == abi::ELFOSABI_SYSV {
         return true; // System V ABI is broadly compatible
     }
 
