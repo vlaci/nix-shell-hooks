@@ -32,7 +32,7 @@ impl<'a> ElfFile<'a> {
     }
 
     pub(crate) fn has_program_headers(&self) -> bool {
-        self.elf.program_headers.is_empty()
+        !self.elf.program_headers.is_empty()
     }
 
     /// Checks if an ELF file is a statically linked executable

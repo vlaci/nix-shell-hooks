@@ -66,7 +66,7 @@ fn auto_patchelf_file(
         return Ok(dependencies);
     }
 
-    if elf_file.has_program_headers() {
+    if !elf_file.has_program_headers() {
         println!("skipping {} because it contains no segment", path.display());
         return Ok(dependencies);
     }
