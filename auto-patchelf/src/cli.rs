@@ -25,6 +25,16 @@ pub(crate) struct LibrariesConfig {
     pub(crate) add_existing: bool,
 }
 
+/// Parse zero or more arguments
+macro_rules! many0 {
+    ($parser:expr) => {{
+        let Ok(values) = $parser.values() else {
+            continue;
+        };
+        values.map(|v| v.parse()).collect::<Result<_, _>>()?
+    }};
+}
+
 impl Cli {
     pub(crate) fn parse() -> Result<Self, lexopt::Error> {
         use lexopt::prelude::*;
@@ -43,37 +53,22 @@ impl Cli {
         while let Some(arg) = parser.next()? {
             match arg {
                 Long("ignore-missing") => {
-                    let Ok(values) = parser.values() else {
-                        continue;
-                    };
-                    ignore_missing = values.map(|v| v.parse()).collect::<Result<_, _>>()?;
+                    ignore_missing = many0!(parser);
                 }
                 Long("no-recurse") => {
                     recurse = false;
                 }
                 Long("paths") => {
-                    let Ok(values) = parser.values() else {
-                        continue;
-                    };
-                    paths = values.map(|v| v.parse()).collect::<Result<_, _>>()?;
+                    paths = many0!(parser);
                 }
                 Long("libs") => {
-                    let Ok(values) = parser.values() else {
-                        continue;
-                    };
-                    libraries = values.map(|v| v.parse()).collect::<Result<_, _>>()?;
+                    libraries = many0!(parser);
                 }
                 Long("runtime-dependencies") => {
-                    let Ok(values) = parser.values() else {
-                        continue;
-                    };
-                    runtime_dependencies = values.map(|v| v.parse()).collect::<Result<_, _>>()?;
+                    runtime_dependencies = many0!(parser);
                 }
                 Long("append-rpaths") => {
-                    let Ok(values) = parser.values() else {
-                        continue;
-                    };
-                    append_rpaths = values.map(|v| v.parse()).collect::<Result<_, _>>()?;
+                    append_rpaths = many0!(parser);
                 }
                 Long("keep-libc") => {
                     keep_libc = true;
@@ -82,10 +77,7 @@ impl Cli {
                     add_existing = false;
                 }
                 Long("extra-args") => {
-                    let Ok(values) = parser.values() else {
-                        continue;
-                    };
-                    extra_args = values.map(|v| v.parse()).collect::<Result<_, _>>()?;
+                    extra_args = many0!(parser);
                 }
                 Short('h') | Long("help") => {
                     println!(
