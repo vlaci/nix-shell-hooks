@@ -84,6 +84,7 @@
               rustfmt
               clippy
             ];
+            env.NIX_BINTOOLS = "${bintools}";
           };
         }
       );
