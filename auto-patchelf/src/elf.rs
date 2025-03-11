@@ -19,7 +19,7 @@ pub(crate) type Arch = u16;
 pub(crate) type OsAbi = u8;
 
 impl<'a> ElfFile<'a> {
-    pub(crate) fn new(content: &'a Vec<u8>) -> Result<Self> {
+    pub(crate) fn new(content: &'a [u8]) -> Result<Self> {
         let elf = Elf::parse(content)?;
         Ok(Self { content, elf })
     }
@@ -94,17 +94,22 @@ impl<'a> ElfFile<'a> {
 
         // Find .note.dlopen section
         // See https://systemd.io/ELF_DLOPEN_METADATA/
-        if let Some(notes) = &self
+        for note in self
             .elf
-            .iter_note_sections(self.content, Some(".note.dlopen"))
+            .iter_note_sections(&self.content, Some(".note.dlopen"))
+            .into_iter()
+            .flatten()
         {
-            for note in &notes.iters {
-                let Ok(text) = String::from_utf8(note.data.into()) else {
-                    continue;
-                };
-                let Ok(dlopen) = json::from_str::<DlOpen>(&text) else {
-                    continue;
-                };
+            let note = note.unwrap();
+
+            let Ok(text) = std::str::from_utf8(note.desc) else {
+                continue;
+            };
+            let text = text.trim_end_matches('\0');
+            let Ok(dlopens) = json::from_str::<Vec<DlOpen>>(&text) else {
+                continue;
+            };
+            for dlopen in dlopens {
                 if !dlopen.soname.is_empty() {
                     dependencies.push(dlopen.soname.into_iter().map(PathBuf::from).collect());
                 }
@@ -145,4 +150,126 @@ pub(crate) fn osabi_are_compatible(wanted: OsAbi, got: OsAbi) -> bool {
     }
 
     wanted == got // Otherwise require exact match
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    macro_rules! asset {
+        ($fname:expr) => {
+            concat!(env!("CARGO_MANIFEST_DIR"), "/tests/assets/", $fname)
+        };
+    }
+    #[test]
+    fn test_parsing() {
+        let content = include_bytes!(asset!("pam_systemd_home.so"));
+
+        let elf = ElfFile::new(content).unwrap();
+
+        assert_eq!(elf.get_arch(), header::EM_X86_64);
+        assert_eq!(elf.get_osabi(), header::ELFOSABI_NONE);
+        assert!(elf.has_program_headers());
+        assert!(!elf.is_static_executable());
+        assert!(!elf.is_dynamic_executable());
+
+        assert_eq!(
+            elf.get_rpath(),
+            vec![
+                "/nix/store/0szrc79hm06rprwd4v5lg80fwg4sn2wj-libxcrypt-4.4.36/lib",
+                "/nix/store/mhrs2z02f605vm22xkwkqci14myz5ahc-linux-pam-1.6.1/lib",
+                "/nix/store/h7zcxabfxa7v5xdna45y2hplj31ncf8a-glibc-2.40-36/lib",
+                "/nix/store/7si4bninwpbdhz387ik0ajwr7yi5pf1s-libcap-2.73-lib/lib",
+                "/nix/store/b96snfpcdisxf4s054wmq48l0jrjl562-util-linux-minimal-2.39.4-lib/lib",
+                "/nix/store/5926bc2bqkr0882p4m6yq3wy5brnbwlv-openssl-3.3.2/lib",
+                "/nix/store/ii1fdbyzymw9vj2ywxrmz34wbnlg4fb6-libidn2-2.3.7/lib",
+                "/nix/store/4ab37gxv8n45c4hx1g5939w88y92chvx-p11-kit-0.25.5/lib",
+                "/nix/store/60z71xaimq5giq0844pkqcfln6xzcgi0-tpm2-tss-4.1.3/lib",
+                "/nix/store/8v985qha35alxwgn5s7m6632fk6pcjp2-cryptsetup-2.7.5/lib"
+            ]
+        );
+
+        // dynamic dependencies
+        // [
+        //   {
+        //     "feature": "idn",
+        //     "description": "Support for internationalized domain names",
+        //     "priority": "suggested",
+        //     "soname": [
+        //       "libidn2.so.0"
+        //     ]
+        //   }
+        // ]
+        // [
+        //   {
+        //     "feature": "p11 -kit",
+        //     "description": "Support for PKCS11 hardware tokens",
+        //     "priority": "suggested",
+        //     "soname": [
+        //       "libp11-kit.so.0"
+        //     ]
+        //   }
+        // ]
+        // [
+        //   {
+        //     "feature": "tpm",
+        //     "description": "Support for TPM",
+        //     "priority": "suggested",
+        //     "soname ": [
+        //       "libtss2-mu.so.0"
+        //     ]
+        //   }
+        // ]
+        // [
+        //   {
+        //     "feature": "tpm{",
+        //     "description": "Support for TPM",
+        //     "priority": "suggested",
+        //     "soname": [
+        //       "libtss2-rc.so.0"
+        //     ]
+        //   }
+        // ]
+        // [
+        //   {
+        //     "feature": "tpm",
+        //     "description": "Support for TPM",
+        //     "priority": "suggested",
+        //     "soname ": [
+        //       "libtss2-esys.so.0"
+        //     ]
+        //   }
+        // ]
+        // [
+        //   {
+        //     "feature": "cryptsetup",
+        //     "descriptin": "Support for disk encryption,integrity, and authentication",
+        //     "priority": "suggested",
+        //     "soname": [
+        //       "libcryptsetup.so.12"
+        //     ]
+        //   }
+        // ]
+
+        assert_eq!(
+            elf.get_dependencies(),
+            vec![
+                vec![PathBuf::from("libcrypt.so.2")],
+                vec![PathBuf::from("libpam.so.0")],
+                vec![PathBuf::from("libm.so.6")],
+                vec![PathBuf::from("libcap.so.2")],
+                vec![PathBuf::from("libblkid.so.1")],
+                vec![PathBuf::from("libmount.so.1")],
+                vec![PathBuf::from("libcrypto.so.3")],
+                vec![PathBuf::from("libc.so.6")],
+                vec![PathBuf::from("ld-linux-x86-64.so.2")],
+                vec![PathBuf::from("libidn2.so.0")],
+                vec![PathBuf::from("libp11-kit.so.0")],
+                vec![PathBuf::from("libtss2-mu.so.0")],
+                vec![PathBuf::from("libtss2-rc.so.0")],
+                vec![PathBuf::from("libtss2-esys.so.0")],
+                vec![PathBuf::from("libcryptsetup.so.12")]
+            ]
+        );
+    }
 }
