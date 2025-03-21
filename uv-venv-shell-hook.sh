@@ -10,22 +10,23 @@ venvDir=.venv
 export UV_PYTHON_PREFERENCE=only-system
 
 uvVenvShellHook() {
-    local UV_LOCK_CHECKSUM_FILE="$venvDir/uv.lock.checksum"
-    local EXPECTED_UV_LOCK_CHECKSUM=
+    local UV_INPUTS_FILE="$venvDir/uv.inputs"
+    local EXPECTED_UV_INPUTS=
 
-    if [[ -f "$UV_LOCK_CHECKSUM_FILE" ]]; then
-        EXPECTED_UV_LOCK_CHECKSUM=$(<"$UV_LOCK_CHECKSUM_FILE")
+    if [[ -f "$UV_INPUTS_FILE" ]]; then
+        EXPECTED_UV_INPUTS=$(<"$UV_INPUTS_FILE")
     fi
 
-    local ACTUAL_UV_LOCK_CHECKSUM
-    ACTUAL_UV_LOCK_CHECKSUM=$(@nix@/bin/nix-hash --type sha256 "$venvDir/../uv.lock")
+    local uvExtraArgsArray=()
+    concatTo uvExtraArgsArray uvExtraArgs
 
-    if [[ "$ACTUAL_UV_LOCK_CHECKSUM" != "$EXPECTED_UV_LOCK_CHECKSUM" ]]; then
-        local uvExtraArgsArray=()
-        concatTo uvExtraArgsArray uvExtraArgs
+    local ACTUAL_UV_INPUTS
+    ACTUAL_UV_INPUTS="$(@nix@/bin/nix-hash --type sha256 "$venvDir/../uv.lock"):${uvExtraArgsArray[*]}"
+
+    if [[ "$ACTUAL_UV_INPUTS" != "$EXPECTED_UV_INPUTS" ]]; then
 
         NIX_ENFORCE_PURITY=0 uv sync --frozen "${uvExtraArgsArray[@]}" || exit $?
-        echo "$ACTUAL_UV_LOCK_CHECKSUM" > "$UV_LOCK_CHECKSUM_FILE"
+        echo "$ACTUAL_UV_INPUTS" > "$UV_INPUTS_FILE"
     fi
 
     # shellcheck disable=SC1091
