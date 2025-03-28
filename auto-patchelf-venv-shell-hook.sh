@@ -16,7 +16,9 @@ source @autoPatchelfHook@
 export UV_LINK_MODE=copy
 
 autoPatchelfVenvShellHook() {
-    for p in "${libraries[@]-}"; do
+    local librariesArray=()
+    concatTo librariesArray libraries
+    for p in "${librariesArray[@]}"; do
         addAutoPatchelfSearchPath "$p"
     done
     autoPatchelf "$venvDir/bin" "$venvDir/lib"
