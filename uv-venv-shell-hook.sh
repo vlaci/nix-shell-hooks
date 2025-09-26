@@ -17,8 +17,23 @@ uvVenvShellHook() {
         EXPECTED_UV_INPUTS=$(<"$UV_INPUTS_FILE")
     fi
 
-    local uvExtraArgsArray=()
+    declare -a uvExtraArgsArray
     concatTo uvExtraArgsArray uvExtraArgs
+
+    declare -a uvOverrideCflagsArray
+    declare -a uvOverrideLdflagsArray
+
+    if [[ -n ${uvOverrideCc} ]]; then
+        declare -x CC="${uvOverrideCc}"
+        uvOverridecflagsArray+=("$NIX_CFLAGS_COMPILE")
+        uvOverrideLdflagsArray+=("$NIX_LDFLAGS_COMPILE")
+    fi
+
+    concatTo uvOverrideCflagsArray uvOverrideCflags
+    concatTo uvOverrideLdflagsArray uvOverrideLdflags
+
+    [[ ${#uvOverrideCflagsArray[@]} -gt 0 ]] && declare -x CFLAGS="${uvOverrideCflagsArray[*]}"
+    [[ ${#uvOverrideLdflagsArray[@]} -gt 0 ]] && declare -x LDFLAGS="${uvOverrideLdflagsArray[*]}"
 
     local ACTUAL_UV_INPUTS
     ACTUAL_UV_INPUTS="$(@nix@/bin/nix-hash --type sha256 "$venvDir/../uv.lock"):${uvExtraArgsArray[*]}"
