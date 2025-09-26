@@ -8,7 +8,14 @@ final: prev: {
 
     rustPlatform.buildRustPackage {
       name = "auto-patchelf";
-      src = ./.;
+      src = final.lib.fileset.toSource {
+        root = ./.;
+        fileset = final.lib.fileset.unions [
+          ./Cargo.toml
+          ./Cargo.lock
+          ./auto-patchelf
+        ];
+      };
       cargoLock = {
         lockFile = ./Cargo.lock;
       };
