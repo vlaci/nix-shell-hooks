@@ -41,8 +41,10 @@ uvVenvShellHook() {
     if [[ "$ACTUAL_UV_INPUTS" != "$EXPECTED_UV_INPUTS" ]]; then
 
         NIX_ENFORCE_PURITY=0 uv venv --allow-existing
-        NIX_ENFORCE_PURITY=0 uv sync --frozen "${uvExtraArgsArray[@]}" || exit $?
-        echo "$ACTUAL_UV_INPUTS" > "$UV_INPUTS_FILE"
+        NIX_ENFORCE_PURITY=0 \
+            PATH=${PATH}:@git@/bin \
+            uv sync --frozen "${uvExtraArgsArray[@]}" || exit $?
+        echo "$ACTUAL_UV_INPUTS" >"$UV_INPUTS_FILE"
     fi
 
     # shellcheck disable=SC1091

@@ -38,6 +38,7 @@ final: prev: {
         uvVenvShellHook = callPackage (
           {
             makePythonHook,
+            git,
             nix,
             uv,
           }:
@@ -46,7 +47,7 @@ final: prev: {
             name = "uv-venv-hook";
             propagatedBuildInputs = [ uv ];
             substitutions = {
-              inherit nix;
+              inherit git nix;
             };
           } ./uv-venv-shell-hook.sh
         ) { };
