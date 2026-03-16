@@ -43,7 +43,7 @@ uvVenvShellHook() {
         NIX_ENFORCE_PURITY=0 uv venv --allow-existing
         NIX_ENFORCE_PURITY=0 \
             PATH=${PATH}:@git@/bin \
-            uv sync --frozen "${uvExtraArgsArray[@]}" || exit $?
+            uv sync "${uvExtraArgsArray[@]}" || exit $?
         echo "$ACTUAL_UV_INPUTS" >"$UV_INPUTS_FILE"
     fi
 
