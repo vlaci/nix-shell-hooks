@@ -25,8 +25,8 @@ uvVenvShellHook() {
 
     if [[ -n ${uvOverrideCc} ]]; then
         declare -x CC="${uvOverrideCc}"
-        uvOverridecflagsArray+=("$NIX_CFLAGS_COMPILE")
-        uvOverrideLdflagsArray+=("$NIX_LDFLAGS_COMPILE")
+        uvOverrideCflagsArray+=("$NIX_CFLAGS_COMPILE")
+        uvOverrideLdflagsArray+=("$NIX_LDFLAGS")
     fi
 
     concatTo uvOverrideCflagsArray uvOverrideCflags
