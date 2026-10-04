@@ -11,12 +11,13 @@ if [[ -z "${venvDir-}" ]]; then
 fi
 
 maturinImportShellHook() {
-    local siteDir="$venvDir/@pythonSitePackages@"
+    local siteDir
+    siteDir="$(realpath "$venvDir/@pythonSitePackages@")"
 
     if [[ ! -f "$siteDir/addsite.pth" ]]; then
         "$venvDir"/bin/python -m maturin_import_hook site install --detect-uv
-        echo 'import sys; exec(open("'"$siteDir"'/sitecustomize.py").read())' > "$siteDir/addsite.pth"
     fi
+    echo 'import sys; exec(open("'"$siteDir"'/sitecustomize.py").read())' > "$siteDir/addsite.pth"
 }
 
 shellHook="${shellHook-}"$'\nmaturinImportShellHook'
